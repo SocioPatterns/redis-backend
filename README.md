@@ -76,3 +76,19 @@ Notes
 
 - The SocioPatterns Data Browser (spbrowser) was tested only in Google Chrome.
 
+
+Authors
+-------
+
+Marcello Dalponte  
+Ciro Cattuto  
+Andre' Panisson  
+
+License
+-------
+
+ALL RIGHTS RESERVED
+
+Copyright (C) 2008-2014 Istituto per l'Interscambio Scientifico I.S.I.  
+You can contact us by email (isi@isi.it) or write to:  
+ISI Foundation, Via Alassio 11/c, 10126 Torino, Italy.
