@@ -6,7 +6,6 @@ import argparse
 import socket
 from threading import Thread, Event
 from Queue import Queue
-from sociopatterns.loader import Loader
 from sociopatterns import Sighting, Contact
 from sociopatterns import xxtea
 import struct
@@ -348,16 +347,8 @@ class UDPLoader:
         Returns an iterator that runs over a stream of SocioPatterns object
         """
 
-        #sock = socket.socket(socket.AF_INET, # Internet
-        #             socket.SOCK_DGRAM) # UDP
-        #sock.bind((UDP_IP, UDP_PORT))
-
         while 1:
-            #data, addr = sock.recvfrom(32) # buffer size is 32 bytes
             tstamp = int(time.time())
-            #station_id = struct.unpack('>L', socket.inet_aton(addr[0]))[0]
-            #data = data[16:] # contact informations are stored just in the second 16 bytes
-            #proto = struct.unpack("!B", data[:1])[0]
             pktlen = 32
             packet = self.sock.recvfrom(pktlen)
 
@@ -408,10 +399,6 @@ class UDPLoader:
 
 adder = rediscontactadder.RedisContactAdder(RUN_NAME, '', DELTAT, REDIS_URL, PORT, PASSWD)
 
-
-#sock = socket.socket(socket.AF_INET, # Internet
-#                     socket.SOCK_DGRAM) # UDP
-
 queue = Queue()
 loader = UDPLoader(UDP_IP, UDP_PORT, xxtea_crypto_key=TEA_CRYPTO_KEY, experiment="OBG", decode=False)
 
@@ -426,24 +413,7 @@ class ProducerThread(Thread):
                 queue.put(contact)
                 if not run_event.is_set():
                     break
-
-
-            #global sock
-            #sock.bind((UDP_IP, UDP_PORT))
-            #
-            #seq = 0
-            #while run_event.is_set():
-            #    data, addr = sock.recvfrom(32) # buffer size is 32 bytes
-            #    tstamp = int(time.time())
-            #    station_id = struct.unpack('>L', socket.inet_aton(addr[0]))[0]
-            #    data = data[16:] # contact informations are stored just in the second 16 bytes
-            #    proto = struct.unpack("!B", data[:1])[0]
-            #    if proto != PROTO_CONTACTREPORT:
-            #        continue
-                    
-            #    contact = loader.parse_packet_contact(tstamp, station_id, data)
-            #    queue.put(contact)
-            #    seq += 1
+            
         except ValueError:
             print "Producer: Error %s" % ValueError
             loader.close()
