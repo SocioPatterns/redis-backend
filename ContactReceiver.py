@@ -15,22 +15,24 @@ import os
 parser = argparse.ArgumentParser(description='Start a contact capture into a REDIS database.')
 
 parser.add_argument('name', metavar='<run name>',
-                   help='name to identify the RUN inside the REDIS database')
+                    help='name to identify the RUN inside the REDIS database')
 
 parser.add_argument('tstart', metavar='<start time>', nargs='?',
-                   default=time.time(), type=int, help='start time for the capture data')
+                    default=time.time(), type=int,
+                    help='start time for the capture data')
 
 parser.add_argument('delta', metavar='<frame duration>', nargs='?',
-                   default='20', type=int, help='duration in seconds of time frames')
+                    default='20', type=int,
+                    help='duration in seconds of time frames')
 
 parser.add_argument('url', metavar='<Redis server URL>', nargs='?',
-                   default="localhost", help='URL of Redis server')
+                    default="localhost", help='URL of Redis server')
 
 parser.add_argument('port', metavar='<port>', nargs='?',
-                   default=6379, type=int, help='port of Redis server')
+                    default=6379, type=int, help='port of Redis server')
 
 parser.add_argument('password', metavar='<password>', nargs='?',
-                   default=None, help='password to access the database')
+                    default=None, help='password to access the database')
 
 args = parser.parse_args()
 
@@ -208,22 +210,24 @@ class UDPLoader:
 
             count = count >> 2
 
-        contact = Contact(int(timestamp), station_id, id, seq, seen_id, seen_pwr, seen_cnt, flags=0)
+        contact = Contact(int(timestamp), station_id, id, seq,
+                          seen_id, seen_pwr, seen_cnt, flags=0)
         return contact
 
     def parse_packet_sighting_25C3(self, timestamp, station_id, data):
         (proto, id, size, flags, strength, id_last_seen, reserved, seq, crc) = struct.unpack("!BHBBBHHLH", data)
         if crc != xxtea.crc16(data[:14]):
-            #print 'rejecting packet from 0x%08x on CRC' % station_id
+            # print 'rejecting packet from 0x%08x on CRC' % station_id
             return
 
-        sighting = Sighting(int(timestamp), station_id, id, seq, strength, flags, last_seen=id_last_seen)
+        sighting = Sighting(int(timestamp), station_id, id, seq,
+                            strength, flags, last_seen=id_last_seen)
         return sighting
 
     def parse_packet_contact_OBG(self, timestamp, station_id, data):
         (proto, id, boot_count, flags, seen1, seen2, seen3, seq, crc) = struct.unpack("!BHHBHHHHH", data)
         if crc != xxtea.crc16(data[:14]):
-            #print 'rejecting packet from 0x%08x on CRC' % station_id
+            # print 'rejecting packet from 0x%08x on CRC' % station_id
             return
 
         seen_id = []
@@ -238,22 +242,26 @@ class UDPLoader:
             seen_pwr.append(id2 >> 14)
             seen_cnt.append((id2 >> 11) & 0x07)
 
-        contact = Contact(int(timestamp), station_id, id, seq, seen_id, seen_pwr, seen_cnt, flags=flags, boot_count=boot_count)
+        contact = Contact(int(timestamp), station_id, id, seq,
+                          seen_id, seen_pwr, seen_cnt,
+                          flags=flags, boot_count=boot_count)
         return contact
 
     def parse_packet_sighting_OBG(self, timestamp, station_id, data):
         (proto, id, boot_count, flags, strength, id_last_seen, reserved, seq, crc) = struct.unpack("!BHHBBHBLH", data)
         if crc != xxtea.crc16(data[:14]):
-            #print 'rejecting packet from 0x%08x on CRC' % station_id
+            # print 'rejecting packet from 0x%08x on CRC' % station_id
             return
 
-        sighting = Sighting(int(timestamp), station_id, id, seq, strength, flags, last_seen=id_last_seen, boot_count=boot_count)
+        sighting = Sighting(int(timestamp), station_id, id, seq,
+                            strength, flags, last_seen=id_last_seen,
+                            boot_count=boot_count)
         return sighting
 
     def parse_packet_contact(self, timestamp, station_id, data):
         (proto, id, flags, seen1, seen2, seen3, seen4, seq, crc) = struct.unpack("!BHBHHHHHH", data)
         if crc != xxtea.crc16(data[:14]):
-            #print 'rejecting packet from 0x%08x on CRC' % station_id
+            # print 'rejecting packet from 0x%08x on CRC' % station_id
             return
 
         seen_id = []
@@ -268,16 +276,19 @@ class UDPLoader:
             seen_pwr.append(id2 >> 14)
             seen_cnt.append((id2 >> 11) & 0x07)
 
-        contact = Contact(int(timestamp), station_id, id, seq, seen_id, seen_pwr, seen_cnt, flags=flags)
+        contact = Contact(int(timestamp), station_id, id, seq,
+                          seen_id, seen_pwr, seen_cnt, flags=flags)
         return contact
 
     def parse_packet_sighting(self, timestamp, station_id, data):
         (proto, id, flags, strength, id_last_seen, boot_count, reserved, seq, crc) = struct.unpack("!BHBBHHBLH", data)
         if crc != xxtea.crc16(data[:14]):
-            #print 'rejecting packet from 0x%08x on CRC' % station_id
+            # print 'rejecting packet from 0x%08x on CRC' % station_id
             return
 
-        sighting = Sighting(int(timestamp), station_id, id, seq, strength, flags, last_seen=id_last_seen, boot_count=boot_count)
+        sighting = Sighting(int(timestamp), station_id, id, seq,
+                            strength, flags, last_seen=id_last_seen,
+                            boot_count=boot_count)
         return sighting
 
     def process_packet(self, pktlen, data, timestamp):
@@ -330,12 +341,14 @@ class UDPLoader:
             return obj
 
     def hash_cleanup(self):
-        self.contact_hash_dict = dict( filter( lambda (h, t): t > self.tcleanup - self.contact_time_delta, self.contact_hash_dict.items() ) )
-        self.sighting_hash_dict = dict( filter( lambda (h, t): t > self.tcleanup - self.sighting_time_delta, self.sighting_hash_dict.items() ) )
+        self.contact_hash_dict = dict(filter(lambda (h, t): t > self.tcleanup
+                                             - self.contact_time_delta, self.contact_hash_dict.items()))
+        self.sighting_hash_dict = dict(filter(lambda (h, t): t > self.tcleanup
+                                              - self.sighting_time_delta, self.sighting_hash_dict.items()))
 
     def open(self):
-        self.sock = socket.socket(socket.AF_INET, # Internet
-                     socket.SOCK_DGRAM) # UDP
+        self.sock = socket.socket(socket.AF_INET,  # Internet
+                                  socket.SOCK_DGRAM)  # UDP
         self.sock.bind((UDP_IP, UDP_PORT))
 
     def close(self):
