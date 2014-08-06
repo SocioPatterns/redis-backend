@@ -484,7 +484,7 @@ if __name__ == '__main__':
 
     try:
         while 1:
-            pass
+            time.sleep(1)
     except KeyboardInterrupt:
         print "Attempting to close threads"
         run_event.clear()
