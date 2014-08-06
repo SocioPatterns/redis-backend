@@ -10,33 +10,29 @@ from sociopatterns import Sighting, Contact
 from sociopatterns import xxtea
 import struct
 import time
-import sys
 import os
 
 parser = argparse.ArgumentParser(description='Start a contact capture into a REDIS database.')
 
-parser.add_argument('name', metavar='<run name>', \
+parser.add_argument('name', metavar='<run name>',
                    help='name to identify the RUN inside the REDIS database')
-                   
 
-parser.add_argument('tstart', metavar='<start time>', nargs='?',\
+parser.add_argument('tstart', metavar='<start time>', nargs='?',
                    default=time.time(), type=int, help='start time for the capture data')
 
-parser.add_argument('delta', metavar='<frame duration>', nargs='?', \
+parser.add_argument('delta', metavar='<frame duration>', nargs='?',
                    default='20', type=int, help='duration in seconds of time frames')
 
-parser.add_argument('url', metavar='<Redis server URL>', nargs='?', \
+parser.add_argument('url', metavar='<Redis server URL>', nargs='?',
                    default="localhost", help='URL of Redis server')
 
-parser.add_argument('port', metavar='<port>', nargs='?', \
+parser.add_argument('port', metavar='<port>', nargs='?',
                    default=6379, type=int, help='port of Redis server')
-                   
-parser.add_argument('password', metavar='<password>', nargs='?', \
+
+parser.add_argument('password', metavar='<password>', nargs='?',
                    default=None, help='password to access the database')
-                   
+
 args = parser.parse_args()
-
-
 
 RUN_NAME = args.name
 DELTAT = args.delta
@@ -44,10 +40,11 @@ REDIS_URL = args.url
 PORT = args.port
 PASSWD = args.password
 
-TEA_CRYPTO_KEY = ( 0xf6e103d4, 0x77a739f6, 0x65eecead, 0xa40543a9 )
+TEA_CRYPTO_KEY = (0xf6e103d4, 0x77a739f6, 0x65eecead, 0xa40543a9)
 PROTO_CONTACTREPORT = 69
 UDP_IP = "10.254.0.1"
 UDP_PORT = 2342
+
 
 class UDPLoader:
     """
@@ -57,7 +54,11 @@ class UDPLoader:
     that are instances of the Contact and Sighting classes.
     """
 
-    def __init__(self, UDP_IP, UDP_PORT, start_time=None, stop_time=None, readers=None, decode=True, xxtea_crypto_key=None, load_sightings=0, unique_sightings=0, sighting_time_delta=10, load_contacts=1, unique_contacts=1, contact_time_delta=10, experiment=None, mapping=None):
+    def __init__(self, UDP_IP, UDP_PORT, start_time=None, stop_time=None,
+                 readers=None, decode=True, xxtea_crypto_key=None,
+                 load_sightings=0, unique_sightings=0, sighting_time_delta=10,
+                 load_contacts=1, unique_contacts=1, contact_time_delta=10,
+                 experiment=None, mapping=None):
         """
         Loader class constructor.
 
@@ -215,7 +216,7 @@ class UDPLoader:
         if crc != xxtea.crc16(data[:14]):
             #print 'rejecting packet from 0x%08x on CRC' % station_id
             return
-       
+
         sighting = Sighting(int(timestamp), station_id, id, seq, strength, flags, last_seen=id_last_seen)
         return sighting
 
@@ -245,7 +246,7 @@ class UDPLoader:
         if crc != xxtea.crc16(data[:14]):
             #print 'rejecting packet from 0x%08x on CRC' % station_id
             return
-       
+
         sighting = Sighting(int(timestamp), station_id, id, seq, strength, flags, last_seen=id_last_seen, boot_count=boot_count)
         return sighting
 
@@ -275,7 +276,7 @@ class UDPLoader:
         if crc != xxtea.crc16(data[:14]):
             #print 'rejecting packet from 0x%08x on CRC' % station_id
             return
-       
+
         sighting = Sighting(int(timestamp), station_id, id, seq, strength, flags, last_seen=id_last_seen, boot_count=boot_count)
         return sighting
 
@@ -312,7 +313,7 @@ class UDPLoader:
                 seen_id.append(mapped_id)
                 seen_pwr.append(pwr)
                 seen_cnt.append(cnt)
-           
+
             obj.seen_id = seen_id
             obj.seen_pwr = seen_pwr
             obj.seen_cnt = seen_cnt
@@ -328,10 +329,9 @@ class UDPLoader:
 
             return obj
 
-    def hash_cleanup(self):        
+    def hash_cleanup(self):
         self.contact_hash_dict = dict( filter( lambda (h, t): t > self.tcleanup - self.contact_time_delta, self.contact_hash_dict.items() ) )
         self.sighting_hash_dict = dict( filter( lambda (h, t): t > self.tcleanup - self.sighting_time_delta, self.sighting_hash_dict.items() ) )
-
 
     def open(self):
         self.sock = socket.socket(socket.AF_INET, # Internet
@@ -340,7 +340,6 @@ class UDPLoader:
 
     def close(self):
         self.sock.close()
-
 
     def __iter__(self):
         """
@@ -353,12 +352,12 @@ class UDPLoader:
             packet = self.sock.recvfrom(pktlen)
 
             obj = self.process_packet(pktlen, packet, tstamp)
-            if obj == None:
+            if obj is None:
                 continue
 
             if self.mapping:
                 obj = self.process_mapping(obj)
-                if obj == None:
+                if obj is None:
                     continue
 
             if self.readers and not (obj.ip in self.readers):
@@ -395,12 +394,11 @@ class UDPLoader:
                     yield obj
 
 
-
-
 adder = rediscontactadder.RedisContactAdder(RUN_NAME, '', DELTAT, REDIS_URL, PORT, PASSWD)
 
 queue = Queue()
 loader = UDPLoader(UDP_IP, UDP_PORT, xxtea_crypto_key=TEA_CRYPTO_KEY, experiment="OBG", decode=False)
+
 
 class ProducerThread(Thread):
     def run(self):
@@ -413,20 +411,19 @@ class ProducerThread(Thread):
                 queue.put(contact)
                 if not run_event.is_set():
                     break
-            
+
         except ValueError:
             print "Producer: Error %s" % ValueError
             loader.close()
             raise
-            
-            
-            
+
+
 class ConsumerThread(Thread):
     def run(self):
         try:
             print "ConsumerThread created."
             global queue
-            #global sock
+            # global sock
 
             while run_event.is_set():
                 contact = queue.get()
@@ -465,5 +462,4 @@ if __name__ == '__main__':
         loader.close()
         print "Socket closed."
         os._exit(0)
-
 
