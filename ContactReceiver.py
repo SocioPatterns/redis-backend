@@ -48,53 +48,136 @@ UDP_IP = "10.254.0.1"
 UDP_PORT = 2342
 
 
+# def parse_packet_contact_25C3(timestamp, station_id, data):
+#     (proto, id, id1, id2, id3, count, seq, crc) = struct.unpack("!BHHHHBLH", data)
+#     if crc != xxtea.crc16(data[:14]):
+#         #print 'rejecting packet from 0x%08x on CRC' % station_id
+#         return
+#
+#     seen_id = []
+#     seen_pwr = []
+#     seen_cnt = []
+#
+#     for id2 in [id1, id2, id3]:
+#         if not id2:
+#             break
+#
+#         cnt = count & 3
+#         if not cnt:
+#             cnt = 4
+#
+#         seen_id.append(id2)
+#         seen_cnt.append(cnt)
+#         seen_pwr.append(0)
+#
+#         count = count >> 2
+#
+#     contact = Contact(int(timestamp), station_id, id, seq,
+#                       seen_id, seen_pwr, seen_cnt, flags=0)
+#     return contact
+#
+# def parse_packet_sighting_25C3(timestamp, station_id, data):
+#     (proto, id, size, flags, strength, id_last_seen, reserved, seq, crc) = struct.unpack("!BHBBBHHLH", data)
+#     if crc != xxtea.crc16(data[:14]):
+#         # print 'rejecting packet from 0x%08x on CRC' % station_id
+#         return
+#
+#     sighting = Sighting(int(timestamp), station_id, id, seq,
+#                         strength, flags, last_seen=id_last_seen)
+#     return sighting
+
+# def parse_packet_contact(timestamp, station_id, data):
+#     (proto, id, boot_count, flags, seen1, seen2, seen3, seq, crc) = struct.unpack("!BHHBHHHHH", data)
+#     if crc != xxtea.crc16(data[:14]):
+#         # print 'rejecting packet from 0x%08x on CRC' % station_id
+#         return
+#
+#     seen_id = []
+#     seen_pwr = []
+#     seen_cnt = []
+#
+#     for id2 in [seen1, seen2, seen3]:
+#         if not id2:
+#             break
+#
+#         seen_id.append(id2 & 0x07FF)
+#         seen_pwr.append(id2 >> 14)
+#         seen_cnt.append((id2 >> 11) & 0x07)
+#
+#     contact = Contact(int(timestamp), station_id, id, seq,
+#                       seen_id, seen_pwr, seen_cnt,
+#                       flags=flags, boot_count=boot_count)
+#     return contact
+#
+# def parse_packet_sighting(timestamp, station_id, data):
+#     (proto, id, boot_count, flags, strength, id_last_seen, reserved, seq, crc) = struct.unpack("!BHHBBHBLH", data)
+#     if crc != xxtea.crc16(data[:14]):
+#         # print 'rejecting packet from 0x%08x on CRC' % station_id
+#         return
+#
+#     sighting = Sighting(int(timestamp), station_id, id, seq,
+#                         strength, flags, last_seen=id_last_seen,
+#                         boot_count=boot_count)
+#     return sighting
+
+def parse_packet_contact(timestamp, station_id, data):
+    (proto, id, flags, seen1, seen2, seen3, seen4, seq, crc) = struct.unpack("!BHBHHHHHH", data)
+    if crc != xxtea.crc16(data[:14]):
+        # print 'rejecting packet from 0x%08x on CRC' % station_id
+        return
+
+    seen_id = []
+    seen_pwr = []
+    seen_cnt = []
+
+    for id2 in [seen1, seen2, seen3, seen4]:
+        if not id2:
+            break
+
+        seen_id.append(id2 & 0x07FF)
+        seen_pwr.append(id2 >> 14)
+        seen_cnt.append((id2 >> 11) & 0x07)
+
+    contact = Contact(int(timestamp), station_id, id, seq,
+                      seen_id, seen_pwr, seen_cnt, flags=flags)
+    return contact
+
+
+def parse_packet_sighting(timestamp, station_id, data):
+    (proto, id, flags, strength, id_last_seen, boot_count, reserved, seq, crc) = struct.unpack("!BHBBHHBLH", data)
+    if crc != xxtea.crc16(data[:14]):
+        # print 'rejecting packet from 0x%08x on CRC' % station_id
+        return
+
+    sighting = Sighting(int(timestamp), station_id, id, seq,
+                        strength, flags, last_seen=id_last_seen,
+                        boot_count=boot_count)
+    return sighting
+
+
 class UDPLoader:
     """
-    The Loader class reads one or multiple network dump files in pcap format,
+    The UDP Loader class collects UDP packets,
     performs basic selection and filtering operations,
     and provides an iterator over a stream of SocioPatterns events
     that are instances of the Contact and Sighting classes.
     """
 
-    def __init__(self, UDP_IP, UDP_PORT, start_time=None, stop_time=None,
-                 readers=None, decode=True, xxtea_crypto_key=None,
+    def __init__(self, UDP_IP, UDP_PORT, decode=True, xxtea_crypto_key=None,
                  load_sightings=0, unique_sightings=0, sighting_time_delta=10,
                  load_contacts=1, unique_contacts=1, contact_time_delta=10,
-                 experiment=None, mapping=None):
+                 experiment=None):
         """
-        Loader class constructor.
+        UDP Loader class constructor.
 
         required arguments:
 
-        pcap_filenames -- a filename or a list of filenames
-        indicating the pcap files to be processed
+        UDP_IP -- the address of the computer that is receiving packets
+        (where ContactReceiver.py is executed).
+
+        UDP_PORT -- the port to which the UDP packets are sent (default 2342).
 
         keyword arguments:
-
-        pcap_filter -- a TCPDUMP filter string, as described in
-        http://manpages.ubuntu.com/manpages/karmic/man7/pcap-filter.7.html
-
-        files_assume_continuity -- Boolean flag. If set, it makes the Loader
-        assume that there are no temporal gaps between consecutive pcap files.
-        This affects only the disambiguation of multiple contacts reported
-        by different readers across the file boundary. It should be set to
-        False only if it is known that the different pcap files correspond
-        to separate data-taking sessions.
-
-        files_time_order -- Boolean flag. If set, the Loader instance looks up
-        the timestamp of the first packet of each file, and processes the file
-        in increasing order of those timestamps. If not set, the Loader reads
-        the files in the order they appear in the pcap_filenames list.
-
-        start_time -- unix ctime integer. If specified, all packets
-        with timestamp earlier than start_time are ignored.
-
-        stop_time -- unix ctime integer. If specified, all packets
-        with timestamp later than stop_time are ignored.
-
-        readers -- sequence of reader IDs. If specified, only packets
-        received from the specified readers are considered,
-        and the others are ignored.
 
         decode -- Boolean flag. If set, the Loader decodes packets
         before processing them, using the crypto key specified
@@ -147,11 +230,6 @@ class UDPLoader:
 
         self.UDP_IP, self.UDP_PORT = UDP_IP, UDP_PORT
 
-        self.start_time = start_time
-        self.stop_time = stop_time
-
-        self.readers = readers
-
         self.load_sightings = load_sightings
         self.unique_sightings = unique_sightings
 
@@ -171,125 +249,10 @@ class UDPLoader:
         self.time_delta = max(sighting_time_delta, contact_time_delta)
         self.tcleanup = -1
 
-        self.experiment = experiment
-        if experiment == '25c3':
-            self.parse_packet_contact = self.parse_packet_contact_25C3
-            self.parse_packet_sighting = self.parse_packet_sighting_25C3
-        elif experiment == 'OBG':
-            self.parse_packet_contact = self.parse_packet_contact_OBG
-            self.parse_packet_sighting = self.parse_packet_sighting_OBG
-
-        self.mapping = mapping
-
     def unpack_packet(self, packet):
         data, addr = packet
         station_id = struct.unpack('>L', socket.inet_aton(addr[0]))[0]
         return station_id, data[16:]
-
-    def parse_packet_contact_25C3(self, timestamp, station_id, data):
-        (proto, id, id1, id2, id3, count, seq, crc) = struct.unpack("!BHHHHBLH", data)
-        if crc != xxtea.crc16(data[:14]):
-            #print 'rejecting packet from 0x%08x on CRC' % station_id
-            return
-
-        seen_id = []
-        seen_pwr = []
-        seen_cnt = []
-
-        for id2 in [id1, id2, id3]:
-            if not id2:
-                break
-
-            cnt = count & 3
-            if not cnt:
-                cnt = 4
-
-            seen_id.append(id2)
-            seen_cnt.append(cnt)
-            seen_pwr.append(0)
-
-            count = count >> 2
-
-        contact = Contact(int(timestamp), station_id, id, seq,
-                          seen_id, seen_pwr, seen_cnt, flags=0)
-        return contact
-
-    def parse_packet_sighting_25C3(self, timestamp, station_id, data):
-        (proto, id, size, flags, strength, id_last_seen, reserved, seq, crc) = struct.unpack("!BHBBBHHLH", data)
-        if crc != xxtea.crc16(data[:14]):
-            # print 'rejecting packet from 0x%08x on CRC' % station_id
-            return
-
-        sighting = Sighting(int(timestamp), station_id, id, seq,
-                            strength, flags, last_seen=id_last_seen)
-        return sighting
-
-    def parse_packet_contact_OBG(self, timestamp, station_id, data):
-        (proto, id, boot_count, flags, seen1, seen2, seen3, seq, crc) = struct.unpack("!BHHBHHHHH", data)
-        if crc != xxtea.crc16(data[:14]):
-            # print 'rejecting packet from 0x%08x on CRC' % station_id
-            return
-
-        seen_id = []
-        seen_pwr = []
-        seen_cnt = []
-
-        for id2 in [seen1, seen2, seen3]:
-            if not id2:
-                break
-
-            seen_id.append(id2 & 0x07FF)
-            seen_pwr.append(id2 >> 14)
-            seen_cnt.append((id2 >> 11) & 0x07)
-
-        contact = Contact(int(timestamp), station_id, id, seq,
-                          seen_id, seen_pwr, seen_cnt,
-                          flags=flags, boot_count=boot_count)
-        return contact
-
-    def parse_packet_sighting_OBG(self, timestamp, station_id, data):
-        (proto, id, boot_count, flags, strength, id_last_seen, reserved, seq, crc) = struct.unpack("!BHHBBHBLH", data)
-        if crc != xxtea.crc16(data[:14]):
-            # print 'rejecting packet from 0x%08x on CRC' % station_id
-            return
-
-        sighting = Sighting(int(timestamp), station_id, id, seq,
-                            strength, flags, last_seen=id_last_seen,
-                            boot_count=boot_count)
-        return sighting
-
-    def parse_packet_contact(self, timestamp, station_id, data):
-        (proto, id, flags, seen1, seen2, seen3, seen4, seq, crc) = struct.unpack("!BHBHHHHHH", data)
-        if crc != xxtea.crc16(data[:14]):
-            # print 'rejecting packet from 0x%08x on CRC' % station_id
-            return
-
-        seen_id = []
-        seen_pwr = []
-        seen_cnt = []
-
-        for id2 in [seen1, seen2, seen3, seen4]:
-            if not id2:
-                break
-
-            seen_id.append(id2 & 0x07FF)
-            seen_pwr.append(id2 >> 14)
-            seen_cnt.append((id2 >> 11) & 0x07)
-
-        contact = Contact(int(timestamp), station_id, id, seq,
-                          seen_id, seen_pwr, seen_cnt, flags=flags)
-        return contact
-
-    def parse_packet_sighting(self, timestamp, station_id, data):
-        (proto, id, flags, strength, id_last_seen, boot_count, reserved, seq, crc) = struct.unpack("!BHBBHHBLH", data)
-        if crc != xxtea.crc16(data[:14]):
-            # print 'rejecting packet from 0x%08x on CRC' % station_id
-            return
-
-        sighting = Sighting(int(timestamp), station_id, id, seq,
-                            strength, flags, last_seen=id_last_seen,
-                            boot_count=boot_count)
-        return sighting
 
     def process_packet(self, pktlen, data, timestamp):
         (station_id, payload) = self.unpack_packet(data)
@@ -302,43 +265,10 @@ class UDPLoader:
         proto = struct.unpack("!B", decrypted_data[0])[0]
 
         if proto == Contact.protocol:
-            return self.parse_packet_contact(timestamp, station_id, decrypted_data)
+            return parse_packet_contact(timestamp, station_id, decrypted_data)
 
         elif proto == Sighting.protocol:
-            return self.parse_packet_sighting(timestamp, station_id, decrypted_data)
-
-    def process_mapping(self, obj):
-        if obj.__class__ == Contact:
-            obj.id = self.mapping.get(obj.t, obj.id)
-            if not obj.id:
-                return None
-
-            seen_id = []
-            seen_pwr = []
-            seen_cnt = []
-
-            for (tag_id, pwr, cnt) in zip(obj.seen_id, obj.seen_pwr, obj.seen_cnt):
-                mapped_id = self.mapping.get(obj.t, tag_id)
-                if not mapped_id:
-                    continue
-                seen_id.append(mapped_id)
-                seen_pwr.append(pwr)
-                seen_cnt.append(cnt)
-
-            obj.seen_id = seen_id
-            obj.seen_pwr = seen_pwr
-            obj.seen_cnt = seen_cnt
-
-            return obj
-
-        elif obj.__class__ == Sighting:
-            obj.id = self.mapping.get(obj.t, obj.id)
-            if not obj.id:
-                return None
-
-            obj.last_seen = self.mapping.get(obj.t, obj.last_seen)
-
-            return obj
+            return parse_packet_sighting(timestamp, station_id, decrypted_data)
 
     def hash_cleanup(self):
         self.contact_hash_dict = dict(filter(lambda (h, t): t > self.tcleanup
@@ -366,14 +296,6 @@ class UDPLoader:
 
             obj = self.process_packet(pktlen, packet, tstamp)
             if obj is None:
-                continue
-
-            if self.mapping:
-                obj = self.process_mapping(obj)
-                if obj is None:
-                    continue
-
-            if self.readers and not (obj.ip in self.readers):
                 continue
 
             if obj.t >= self.tcleanup:
@@ -410,7 +332,7 @@ class UDPLoader:
 adder = rediscontactadder.RedisContactAdder(RUN_NAME, '', DELTAT, REDIS_URL, PORT, PASSWD)
 
 queue = Queue()
-loader = UDPLoader(UDP_IP, UDP_PORT, xxtea_crypto_key=TEA_CRYPTO_KEY, experiment="OBG", decode=False)
+loader = UDPLoader(UDP_IP, UDP_PORT, xxtea_crypto_key=TEA_CRYPTO_KEY, experiment="OBG", decode=True)
 
 
 class ProducerThread(Thread):
