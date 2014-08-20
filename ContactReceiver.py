@@ -215,35 +215,6 @@ class ProducerThread(Thread):
             raise
 
 
-class ConsumerThread(Thread):
-
-    def __init__(self, adder, queue, run_event):
-        self.run_event = run_event
-        self.adder = adder
-        self.queue = queue
-        super(ConsumerThread, self).__init__()
-
-    def run(self):
-        try:
-            print "ConsumerThread created."
-
-            while self.run_event.is_set():
-                contact = self.queue.get()
-                try:
-                    self.adder.store_contact(contact)
-                    print "Contact stored", contact
-                except Exception, e:
-                    print e
-                    print "Contact: ", contact
-                finally:
-                    self.queue.task_done()
-
-        except ValueError:
-            print "Consumer: Error %s" % ValueError
-            self.loader.close()
-            raise
-
-
 def main():
 
     parser = argparse.ArgumentParser(description='Start a contact capture into a REDIS database.')
@@ -291,19 +262,25 @@ def main():
     run_event.set()
     prod = ProducerThread(loader, queue, run_event)
     prod.start()
-    cons = ConsumerThread(adder, queue, run_event)
-    cons.start()
 
     try:
+
         while 1:
-            time.sleep(1)
+            contact = queue.get()
+            try:
+                adder.store_contact(contact)
+                print "Contact stored", contact
+            except Exception, e:
+                print e
+                print "Contact: ", contact
+            finally:
+                queue.task_done()
+
     except KeyboardInterrupt:
         print "Attempting to close threads"
         run_event.clear()
         prod.join(2)
         print "Producer closed."
-        cons.join(2)
-        print "Consumer closed."
         loader.close()
         print "Socket closed."
         os._exit(0)
