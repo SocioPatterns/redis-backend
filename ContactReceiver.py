@@ -8,6 +8,7 @@ from threading import Thread, Event
 from Queue import Queue
 from sociopatterns import Sighting, Contact
 from sociopatterns import xxtea
+import spparser
 import struct
 import time
 import os
@@ -48,113 +49,6 @@ UDP_IP = "10.254.0.1"
 UDP_PORT = 2342
 
 
-# def parse_packet_contact_25C3(timestamp, station_id, data):
-#     (proto, id, id1, id2, id3, count, seq, crc) = struct.unpack("!BHHHHBLH", data)
-#     if crc != xxtea.crc16(data[:14]):
-#         #print 'rejecting packet from 0x%08x on CRC' % station_id
-#         return
-#
-#     seen_id = []
-#     seen_pwr = []
-#     seen_cnt = []
-#
-#     for id2 in [id1, id2, id3]:
-#         if not id2:
-#             break
-#
-#         cnt = count & 3
-#         if not cnt:
-#             cnt = 4
-#
-#         seen_id.append(id2)
-#         seen_cnt.append(cnt)
-#         seen_pwr.append(0)
-#
-#         count = count >> 2
-#
-#     contact = Contact(int(timestamp), station_id, id, seq,
-#                       seen_id, seen_pwr, seen_cnt, flags=0)
-#     return contact
-#
-# def parse_packet_sighting_25C3(timestamp, station_id, data):
-#     (proto, id, size, flags, strength, id_last_seen, reserved, seq, crc) = struct.unpack("!BHBBBHHLH", data)
-#     if crc != xxtea.crc16(data[:14]):
-#         # print 'rejecting packet from 0x%08x on CRC' % station_id
-#         return
-#
-#     sighting = Sighting(int(timestamp), station_id, id, seq,
-#                         strength, flags, last_seen=id_last_seen)
-#     return sighting
-
-# def parse_packet_contact(timestamp, station_id, data):
-#     (proto, id, boot_count, flags, seen1, seen2, seen3, seq, crc) = struct.unpack("!BHHBHHHHH", data)
-#     if crc != xxtea.crc16(data[:14]):
-#         # print 'rejecting packet from 0x%08x on CRC' % station_id
-#         return
-#
-#     seen_id = []
-#     seen_pwr = []
-#     seen_cnt = []
-#
-#     for id2 in [seen1, seen2, seen3]:
-#         if not id2:
-#             break
-#
-#         seen_id.append(id2 & 0x07FF)
-#         seen_pwr.append(id2 >> 14)
-#         seen_cnt.append((id2 >> 11) & 0x07)
-#
-#     contact = Contact(int(timestamp), station_id, id, seq,
-#                       seen_id, seen_pwr, seen_cnt,
-#                       flags=flags, boot_count=boot_count)
-#     return contact
-#
-# def parse_packet_sighting(timestamp, station_id, data):
-#     (proto, id, boot_count, flags, strength, id_last_seen, reserved, seq, crc) = struct.unpack("!BHHBBHBLH", data)
-#     if crc != xxtea.crc16(data[:14]):
-#         # print 'rejecting packet from 0x%08x on CRC' % station_id
-#         return
-#
-#     sighting = Sighting(int(timestamp), station_id, id, seq,
-#                         strength, flags, last_seen=id_last_seen,
-#                         boot_count=boot_count)
-#     return sighting
-
-def parse_packet_contact(timestamp, station_id, data):
-    (proto, id, flags, seen1, seen2, seen3, seen4, seq, crc) = struct.unpack("!BHBHHHHHH", data)
-    if crc != xxtea.crc16(data[:14]):
-        # print 'rejecting packet from 0x%08x on CRC' % station_id
-        return
-
-    seen_id = []
-    seen_pwr = []
-    seen_cnt = []
-
-    for id2 in [seen1, seen2, seen3, seen4]:
-        if not id2:
-            break
-
-        seen_id.append(id2 & 0x07FF)
-        seen_pwr.append(id2 >> 14)
-        seen_cnt.append((id2 >> 11) & 0x07)
-
-    contact = Contact(int(timestamp), station_id, id, seq,
-                      seen_id, seen_pwr, seen_cnt, flags=flags)
-    return contact
-
-
-def parse_packet_sighting(timestamp, station_id, data):
-    (proto, id, flags, strength, id_last_seen, boot_count, reserved, seq, crc) = struct.unpack("!BHBBHHBLH", data)
-    if crc != xxtea.crc16(data[:14]):
-        # print 'rejecting packet from 0x%08x on CRC' % station_id
-        return
-
-    sighting = Sighting(int(timestamp), station_id, id, seq,
-                        strength, flags, last_seen=id_last_seen,
-                        boot_count=boot_count)
-    return sighting
-
-
 class UDPLoader:
     """
     The UDP Loader class collects UDP packets,
@@ -166,7 +60,7 @@ class UDPLoader:
     def __init__(self, UDP_IP, UDP_PORT, decode=True, xxtea_crypto_key=None,
                  load_sightings=0, unique_sightings=0, sighting_time_delta=10,
                  load_contacts=1, unique_contacts=1, contact_time_delta=10,
-                 experiment=None):
+                 packet_parser=spparser.PacketParser()):
         """
         UDP Loader class constructor.
 
@@ -221,11 +115,9 @@ class UDPLoader:
         large delays (several seconds), any value above
         a few seconds will work well.
 
-        experiment -- string specifying the name of a specific experiment.
+        packet_parser -- parser for a specific experiment.
         This can be used by subclasses to activate experiment-specific
-        packet processing. The Loader class currently recognizes
-        the "25c3" experiment only. When specified, this activates
-        alternate parsing of the OpenBeacon packets, as used at 25C3.
+        packet processing.
         """
 
         self.UDP_IP, self.UDP_PORT = UDP_IP, UDP_PORT
@@ -249,6 +141,8 @@ class UDPLoader:
         self.time_delta = max(sighting_time_delta, contact_time_delta)
         self.tcleanup = -1
 
+        self.parser = packet_parser
+
     def unpack_packet(self, packet):
         data, addr = packet
         station_id = struct.unpack('>L', socket.inet_aton(addr[0]))[0]
@@ -262,13 +156,7 @@ class UDPLoader:
         else:
             decrypted_data = payload
 
-        proto = struct.unpack("!B", decrypted_data[0])[0]
-
-        if proto == Contact.protocol:
-            return parse_packet_contact(timestamp, station_id, decrypted_data)
-
-        elif proto == Sighting.protocol:
-            return parse_packet_sighting(timestamp, station_id, decrypted_data)
+        return self.parser.parse_packet(timestamp, station_id, decrypted_data)
 
     def hash_cleanup(self):
         self.contact_hash_dict = dict(filter(lambda (h, t): t > self.tcleanup
@@ -332,7 +220,7 @@ class UDPLoader:
 adder = rediscontactadder.RedisContactAdder(RUN_NAME, '', DELTAT, REDIS_URL, PORT, PASSWD)
 
 queue = Queue()
-loader = UDPLoader(UDP_IP, UDP_PORT, xxtea_crypto_key=TEA_CRYPTO_KEY, experiment="OBG", decode=True)
+loader = UDPLoader(UDP_IP, UDP_PORT, xxtea_crypto_key=TEA_CRYPTO_KEY, decode=True)
 
 
 class ProducerThread(Thread):
