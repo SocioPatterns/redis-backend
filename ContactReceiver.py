@@ -4,7 +4,7 @@ import rediscontactadder
 import argparse
 import socket
 from threading import Thread, Event
-from Queue import Queue
+import Queue
 from sociopatterns import Sighting, Contact
 from sociopatterns import xxtea
 import spparser
@@ -248,7 +248,7 @@ def main():
 
     adder = rediscontactadder.RedisContactAdder(RUN_NAME, '', DELTAT, REDIS_URL, PORT, PASSWD)
 
-    queue = Queue()
+    queue = Queue.Queue()
     loader = UDPLoader(UDP_IP, UDP_PORT,
                        SPProcessor(xxtea_crypto_key=TEA_CRYPTO_KEY, decode=True,
                                    packet_parser=spparser.PacketParser()))
@@ -256,30 +256,29 @@ def main():
     run_event = Event()
     run_event.set()
     prod = ProducerThread(loader, queue, run_event)
+    prod.daemon = True
     prod.start()
 
     try:
-
         while 1:
-            contact = queue.get()
             try:
-                adder.store_contact(contact)
-                print "Contact stored", contact
-            except Exception, e:
-                print e
-                print "Contact: ", contact
-            finally:
+                contact = queue.get(True, 1)
+                if contact is not None:
+                    adder.store_contact(contact)
+                    print "Contact stored", contact
                 queue.task_done()
 
-    except KeyboardInterrupt:
+            except KeyboardInterrupt:
+                break
+            except Queue.Empty:
+                pass
+    finally:
         print "Attempting to close threads"
         run_event.clear()
         prod.join(2)
         print "Producer closed."
         loader.close()
         print "Socket closed."
-        os._exit(0)
 
 if __name__ == '__main__':
     main()
-
