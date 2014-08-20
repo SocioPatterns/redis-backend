@@ -2,7 +2,6 @@
 
 import rediscontactadder
 import argparse
-
 import socket
 from threading import Thread, Event
 from Queue import Queue
@@ -13,63 +12,57 @@ import struct
 import time
 import os
 
-parser = argparse.ArgumentParser(description='Start a contact capture into a REDIS database.')
 
-parser.add_argument('name', metavar='<run name>',
-                    help='name to identify the RUN inside the REDIS database')
+class UDPLoader(object):
 
-parser.add_argument('tstart', metavar='<start time>', nargs='?',
-                    default=time.time(), type=int,
-                    help='start time for the capture data')
+    def __init__(self, address, port=2342, processor=None):
+        """
+        UDP Loader class constructor.
 
-parser.add_argument('delta', metavar='<frame duration>', nargs='?',
-                    default='20', type=int,
-                    help='duration in seconds of time frames')
+        Arguments:
 
-parser.add_argument('url', metavar='<Redis server URL>', nargs='?',
-                    default="localhost", help='URL of Redis server')
+        address -- the address of the computer that is receiving packets
+        (where ContactReceiver.py is executed).
 
-parser.add_argument('port', metavar='<port>', nargs='?',
-                    default=6379, type=int, help='port of Redis server')
+        port -- the port to which the UDP packets are sent (default 2342).
 
-parser.add_argument('password', metavar='<password>', nargs='?',
-                    default=None, help='password to access the database')
+        processor -- the processor object that is used to
+        process the packets received.
+        """
+        self.address = address
+        self.port = port
+        self.processor = processor
 
-args = parser.parse_args()
+    def open(self):
+        self.sock = socket.socket(socket.AF_INET,  # Internet
+                                  socket.SOCK_DGRAM)  # UDP
+        self.sock.bind((self.address, self.port))
 
-RUN_NAME = args.name
-DELTAT = args.delta
-REDIS_URL = args.url
-PORT = args.port
-PASSWD = args.password
+    def close(self):
+        self.sock.close()
 
-TEA_CRYPTO_KEY = (0xf6e103d4, 0x77a739f6, 0x65eecead, 0xa40543a9)
-PROTO_CONTACTREPORT = 69
-UDP_IP = "10.254.0.1"
-UDP_PORT = 2342
+    def __iter__(self):
+        """
+        Returns an iterator that runs over a stream of objects
+        """
+
+        while 1:
+            pktlen = 32
+            packet = self.sock.recvfrom(pktlen)
+
+            obj = self.processor.process(packet)
+            if obj is not None:
+                yield obj
 
 
-class UDPLoader:
-    """
-    The UDP Loader class collects UDP packets,
-    performs basic selection and filtering operations,
-    and provides an iterator over a stream of SocioPatterns events
-    that are instances of the Contact and Sighting classes.
-    """
+class SPProcessor(object):
 
-    def __init__(self, UDP_IP, UDP_PORT, decode=True, xxtea_crypto_key=None,
+    def __init__(self, decode=True, xxtea_crypto_key=None,
                  load_sightings=0, unique_sightings=0, sighting_time_delta=10,
                  load_contacts=1, unique_contacts=1, contact_time_delta=10,
                  packet_parser=spparser.PacketParser()):
         """
-        UDP Loader class constructor.
-
-        required arguments:
-
-        UDP_IP -- the address of the computer that is receiving packets
-        (where ContactReceiver.py is executed).
-
-        UDP_PORT -- the port to which the UDP packets are sent (default 2342).
+        SocioPatterns packet processor
 
         keyword arguments:
 
@@ -120,8 +113,6 @@ class UDPLoader:
         packet processing.
         """
 
-        self.UDP_IP, self.UDP_PORT = UDP_IP, UDP_PORT
-
         self.load_sightings = load_sightings
         self.unique_sightings = unique_sightings
 
@@ -143,13 +134,10 @@ class UDPLoader:
 
         self.parser = packet_parser
 
-    def unpack_packet(self, packet):
+    def process_packet(self, packet, timestamp):
         data, addr = packet
         station_id = struct.unpack('>L', socket.inet_aton(addr[0]))[0]
-        return station_id, data[16:]
-
-    def process_packet(self, pktlen, data, timestamp):
-        (station_id, payload) = self.unpack_packet(data)
+        (station_id, payload) = station_id, data[16:]
 
         if self.decode:
             decrypted_data = xxtea.decode(payload)
@@ -164,112 +152,146 @@ class UDPLoader:
         self.sighting_hash_dict = dict(filter(lambda (h, t): t > self.tcleanup
                                               - self.sighting_time_delta, self.sighting_hash_dict.items()))
 
-    def open(self):
-        self.sock = socket.socket(socket.AF_INET,  # Internet
-                                  socket.SOCK_DGRAM)  # UDP
-        self.sock.bind((UDP_IP, UDP_PORT))
+    def process(self, packet):
+        tstamp = int(time.time())
 
-    def close(self):
-        self.sock.close()
+        obj = self.process_packet(packet, tstamp)
+        if obj is None:
+            return
 
-    def __iter__(self):
-        """
-        Returns an iterator that runs over a stream of SocioPatterns object
-        """
+        if obj.t >= self.tcleanup:
+            self.hash_cleanup()
+            self.tcleanup = obj.t + self.time_delta
 
-        while 1:
-            tstamp = int(time.time())
-            pktlen = 32
-            packet = self.sock.recvfrom(pktlen)
-
-            obj = self.process_packet(pktlen, packet, tstamp)
-            if obj is None:
-                continue
-
-            if obj.t >= self.tcleanup:
-                self.hash_cleanup()
-                self.tcleanup = obj.t + self.time_delta
-
-            if (obj.__class__ == Sighting) and self.load_sightings:
-                if self.unique_sightings:
-                    h = obj.get_hash()
-                    if h in self.sighting_hash_dict:
-                        if obj.t - self.sighting_hash_dict[h] > self.sighting_time_delta:
-                            self.sighting_hash_dict[h] = obj.t
-                            yield obj
-                    else:
+        if (obj.__class__ == Sighting) and self.load_sightings:
+            if self.unique_sightings:
+                h = obj.get_hash()
+                if h in self.sighting_hash_dict:
+                    if obj.t - self.sighting_hash_dict[h] > self.sighting_time_delta:
                         self.sighting_hash_dict[h] = obj.t
-                        yield obj
+                        return obj
                 else:
-                    yield obj
+                    self.sighting_hash_dict[h] = obj.t
+                    return obj
+            else:
+                return obj
 
-            elif (obj.__class__ == Contact) and self.load_contacts:
-                if self.unique_contacts:
-                    h = obj.get_hash()
-                    if h in self.contact_hash_dict:
-                        if obj.t - self.contact_hash_dict[h] > self.contact_time_delta:
-                            self.contact_hash_dict[h] = obj.t
-                            yield obj
-                    else:
+        elif (obj.__class__ == Contact) and self.load_contacts:
+            if self.unique_contacts:
+                h = obj.get_hash()
+                if h in self.contact_hash_dict:
+                    if obj.t - self.contact_hash_dict[h] > self.contact_time_delta:
                         self.contact_hash_dict[h] = obj.t
-                        yield obj
+                        return obj
                 else:
-                    yield obj
-
-
-adder = rediscontactadder.RedisContactAdder(RUN_NAME, '', DELTAT, REDIS_URL, PORT, PASSWD)
-
-queue = Queue()
-loader = UDPLoader(UDP_IP, UDP_PORT, xxtea_crypto_key=TEA_CRYPTO_KEY, decode=True)
+                    self.contact_hash_dict[h] = obj.t
+                    return obj
+            else:
+                return obj
 
 
 class ProducerThread(Thread):
+
+    def __init__(self, loader, queue, run_event):
+        self.run_event = run_event
+        self.loader = loader
+        self.queue = queue
+        super(ProducerThread, self).__init__()
+
     def run(self):
         try:
             print "ProducerThread created."
 
-            loader.open()
+            self.loader.open()
 
-            for contact in loader:
-                queue.put(contact)
-                if not run_event.is_set():
+            for contact in self.loader:
+                self.queue.put(contact)
+                if not self.run_event.is_set():
                     break
 
         except ValueError:
             print "Producer: Error %s" % ValueError
-            loader.close()
+            self.loader.close()
             raise
 
 
 class ConsumerThread(Thread):
+
+    def __init__(self, adder, queue, run_event):
+        self.run_event = run_event
+        self.adder = adder
+        self.queue = queue
+        super(ConsumerThread, self).__init__()
+
     def run(self):
         try:
             print "ConsumerThread created."
-            global queue
-            # global sock
 
-            while run_event.is_set():
-                contact = queue.get()
+            while self.run_event.is_set():
+                contact = self.queue.get()
                 try:
-                    adder.store_contact(contact)
+                    self.adder.store_contact(contact)
                     print "Contact stored", contact
                 except Exception, e:
                     print e
                     print "Contact: ", contact
                 finally:
-                    queue.task_done()
+                    self.queue.task_done()
 
         except ValueError:
             print "Consumer: Error %s" % ValueError
-            loader.close()
+            self.loader.close()
             raise
 
-if __name__ == '__main__':
+
+def main():
+
+    parser = argparse.ArgumentParser(description='Start a contact capture into a REDIS database.')
+
+    parser.add_argument('name', metavar='<run name>',
+                        help='name to identify the RUN inside the REDIS database')
+
+    parser.add_argument('tstart', metavar='<start time>', nargs='?',
+                        default=time.time(), type=int,
+                        help='start time for the capture data')
+
+    parser.add_argument('delta', metavar='<frame duration>', nargs='?',
+                        default='20', type=int,
+                        help='duration in seconds of time frames')
+
+    parser.add_argument('url', metavar='<Redis server URL>', nargs='?',
+                        default="localhost", help='URL of Redis server')
+
+    parser.add_argument('port', metavar='<port>', nargs='?',
+                        default=6379, type=int, help='port of Redis server')
+
+    parser.add_argument('password', metavar='<password>', nargs='?',
+                        default=None, help='password to access the database')
+
+    args = parser.parse_args()
+
+    RUN_NAME = args.name
+    DELTAT = args.delta
+    REDIS_URL = args.url
+    PORT = args.port
+    PASSWD = args.password
+
+    TEA_CRYPTO_KEY = (0xf6e103d4, 0x77a739f6, 0x65eecead, 0xa40543a9)
+    UDP_IP = "10.254.0.1"
+    UDP_PORT = 2342
+
+    adder = rediscontactadder.RedisContactAdder(RUN_NAME, '', DELTAT, REDIS_URL, PORT, PASSWD)
+
+    queue = Queue()
+    loader = UDPLoader(UDP_IP, UDP_PORT,
+                       SPProcessor(xxtea_crypto_key=TEA_CRYPTO_KEY, decode=True,
+                                   packet_parser=spparser.PacketParser()))
+
     run_event = Event()
     run_event.set()
-    prod = ProducerThread()
+    prod = ProducerThread(loader, queue, run_event)
     prod.start()
-    cons = ConsumerThread()
+    cons = ConsumerThread(adder, queue, run_event)
     cons.start()
 
     try:
@@ -285,4 +307,7 @@ if __name__ == '__main__':
         loader.close()
         print "Socket closed."
         os._exit(0)
+
+if __name__ == '__main__':
+    main()
 
