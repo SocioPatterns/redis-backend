@@ -50,7 +50,11 @@ class UDPLoader(object):
             pktlen = 32
             packet = self.sock.recvfrom(pktlen)
 
-            obj = self.processor.process(packet)
+            data, addr = packet
+            station_id = struct.unpack('>L', socket.inet_aton(addr[0]))[0]
+            payload = data[16:]
+
+            obj = self.processor.process(station_id, payload)
             if obj is not None:
                 yield obj
 
@@ -134,28 +138,19 @@ class SPProcessor(object):
 
         self.parser = packet_parser
 
-    def process_packet(self, packet, timestamp):
-        data, addr = packet
-        station_id = struct.unpack('>L', socket.inet_aton(addr[0]))[0]
-        (station_id, payload) = station_id, data[16:]
-
-        if self.decode:
-            decrypted_data = xxtea.decode(payload)
-        else:
-            decrypted_data = payload
-
-        return self.parser.parse_packet(timestamp, station_id, decrypted_data)
-
     def hash_cleanup(self):
         self.contact_hash_dict = dict(filter(lambda (h, t): t > self.tcleanup
                                              - self.contact_time_delta, self.contact_hash_dict.items()))
         self.sighting_hash_dict = dict(filter(lambda (h, t): t > self.tcleanup
                                               - self.sighting_time_delta, self.sighting_hash_dict.items()))
 
-    def process(self, packet):
-        tstamp = int(time.time())
+    def process(self, station_id, payload):
 
-        obj = self.process_packet(packet, tstamp)
+        if self.decode:
+            payload = xxtea.decode(payload)
+
+        timestamp = int(time.time())
+        obj = self.parser.parse_packet(timestamp, station_id, payload)
         if obj is None:
             return
 
