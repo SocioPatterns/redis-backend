@@ -51,6 +51,23 @@ class PacketParser(object):
                         strength, flags, last_seen=id_last_seen,
                         boot_count=boot_count)
 
+    @classmethod
+    def pack(cls, contact):
+        if (contact.__class__ == Contact):
+            return cls.pack_contact(contact)
+
+    @classmethod
+    def pack_contact(cls, contact):
+        seen = [0, 0, 0, 0]
+        for i in range(len(contact.seen_id)):
+            seen[i] = contact.seen_id[i] | (contact.seen_cnt[i] << 11) | (contact.seen_pwr[i] << 14)
+
+        data = [Contact.protocol, contact.id, contact.flags,
+                seen[0], seen[1], seen[2], seen[3], contact.seq, 0]
+        packed = struct.pack("!BHBHHHHHH", *data)
+        data[-1] = xxtea.crc16(packed[:14])
+        return struct.pack("!BHBHHHHHH", *data)
+
 
 class PacketParserOBG(PacketParser):
 
@@ -82,6 +99,17 @@ class PacketParserOBG(PacketParser):
                         strength, flags, last_seen=id_last_seen,
                         boot_count=boot_count)
 
+    @classmethod
+    def pack_contact(cls, contact):
+        seen = [0, 0, 0]
+        for i in range(len(contact.seen_id)):
+            seen[i] = contact.seen_id[i] | (contact.seen_cnt[i] << 11) | (contact.seen_pwr[i] << 14)
+
+        data = [Contact.protocol, contact.id, contact.boot_count, contact.flags,
+                seen[0], seen[1], seen[2], contact.seq, 0]
+        packed = struct.pack("!BHHBHHHHH", *data)
+        data[-1] = xxtea.crc16(packed[:14])
+        return struct.pack("!BHHBHHHHH", *data)
 
 class PacketParser25C3(PacketParser):
 
