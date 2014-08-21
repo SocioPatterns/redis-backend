@@ -61,7 +61,7 @@ class UDPLoader(object):
 
 class SPProcessor(object):
 
-    def __init__(self, decode=True, xxtea_crypto_key=None,
+    def __init__(self, decode=False, xxtea_crypto_key=None,
                  load_sightings=0, unique_sightings=0, sighting_time_delta=10,
                  load_contacts=1, unique_contacts=1, contact_time_delta=10,
                  packet_parser=spparser.PacketParser()):
@@ -242,7 +242,6 @@ def main():
     PORT = args.port
     PASSWD = args.password
 
-    TEA_CRYPTO_KEY = (0xf6e103d4, 0x77a739f6, 0x65eecead, 0xa40543a9)
     UDP_IP = "10.254.0.1"
     UDP_PORT = 2342
 
@@ -250,8 +249,7 @@ def main():
 
     queue = Queue.Queue()
     loader = UDPLoader(UDP_IP, UDP_PORT,
-                       SPProcessor(xxtea_crypto_key=TEA_CRYPTO_KEY, decode=True,
-                                   packet_parser=spparser.PacketParser()))
+                       SPProcessor(packet_parser=spparser.PacketParserOBG()))
 
     run_event = Event()
     run_event.set()
