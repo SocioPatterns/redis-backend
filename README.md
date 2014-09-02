@@ -78,6 +78,11 @@ Notes
 
 - The SocioPatterns Data Browser (spbrowser) was tested only in Google Chrome.
 
+- To keep a backup of the raw experiment packets and save them into a file for later use, the UDP packets can be captured with `tcpdump`, e.g.:
+    ```
+    $ sudo tcpdump -i eth0 udp dst port 2342 -w log.pcap
+    ```
+
 
 Authors
 -------
